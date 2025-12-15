@@ -2,26 +2,29 @@ package org.example.builder;
 
 import java.util.ArrayList;
 import java.util.List;
+
 import org.example.converter.Converter;
 import org.example.converter.factory.ConverterFactory;
-
 import org.example.converter.factory.ConverterFactorySelector;
-import org.example.processor.BaseProcessor;
-import org.example.processor.BlowfishEncryptionStrategy;
-import org.example.processor.CompressionProcessor;
-import org.example.processor.EncryptionStrategy;
-import org.example.processor.EncryptionStrategyFactory;
-import org.example.processor.ShortcutProcessor;
 import org.example.entities.ConversionSettings;
 import org.example.entities.InputFile;
 import org.example.entities.OutputFile;
 import org.example.file_generator.WixFileGenerator;
 import org.example.file_generator.XmlFileGenerator;
+import org.example.interpreter.Expression;
+import org.example.interpreter.OrExpression;
+import org.example.interpreter.TerminalExpression;
 import org.example.launcher.DecryptAndLaunch;
 import org.example.observer.InstallationObserver;
 import org.example.observer.InstallationSubject;
+import org.example.processor.BaseProcessor;
+import org.example.processor.BlowfishEncryptionStrategy;
+import org.example.processor.CompressionProcessor;
 import org.example.processor.EncryptionProcessor;
+import org.example.processor.EncryptionStrategy;
+import org.example.processor.EncryptionStrategyFactory;
 import org.example.processor.FileProcessor;
+import org.example.processor.ShortcutProcessor;
 
 public class Installer{
   private InputFile file;
@@ -36,6 +39,25 @@ public class Installer{
 
   public void generatePackage() {
     notifyObservers("Starting package generation...", 0);
+
+  
+    Expression py = new TerminalExpression("PY");
+    Expression jar = new TerminalExpression("JAR");
+    Expression validInput = new OrExpression(py, jar);
+    String inputType = file.getFileType().toString().toUpperCase();
+    if (!validInput.interpret(inputType)) {
+      notifyError("Unsupported input file type: " + inputType);
+      return;
+    }
+
+    Expression exe = new TerminalExpression("EXE");
+    Expression msi = new TerminalExpression("MSI");
+    Expression validOutput = new OrExpression(exe, msi);
+    String outputType = outputFile.getFileType().toString().toUpperCase();
+    if (!validOutput.interpret(outputType)) {
+      notifyError("Unsupported output file type: " + outputType);
+      return;
+    }
 
     System.out.println("Generating " + outputFile.getFileType() + " file at " + outputFile.getFilePath());
     notifyObservers("Preparing conversion...", 20);
@@ -71,8 +93,7 @@ public class Installer{
     } catch (Exception e) {
       notifyError("Failed to generate package: " + e.getMessage());
     }
-
-    }
+  }
 
 
   private void decryptAndLaunch() {
