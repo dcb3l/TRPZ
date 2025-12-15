@@ -1,0 +1,222 @@
+package org.example.controllers;
+
+
+import java.io.File;
+import java.io.IOException;
+
+import org.example.builder.Installer;
+import org.example.entities.ConversionSettings;
+import org.example.entities.InputFile;
+import org.example.entities.OutputFile;
+import org.example.observer.GuiObserver;
+import org.example.processor.EncryptionStrategy;
+import org.example.processor.EncryptionStrategyFactory;
+import org.example.server.Client;
+import org.example.state.Session;
+
+import javafx.event.ActionEvent;
+import javafx.fxml.FXML;
+import javafx.fxml.FXMLLoader;
+import javafx.scene.Node;
+import javafx.scene.Parent;
+import javafx.scene.Scene;
+import javafx.scene.control.Button;
+import javafx.scene.control.CheckBox;
+import javafx.scene.control.ComboBox;
+import javafx.scene.control.Label;
+import javafx.scene.control.ProgressBar;
+import javafx.scene.control.TextField;
+import javafx.stage.DirectoryChooser;
+import javafx.stage.FileChooser;
+import javafx.stage.Stage;
+
+public class JarConverterController {
+
+  @FXML
+  private TextField jarFilePath;
+
+  @FXML
+  private TextField savePath;
+
+
+  @FXML
+  private ComboBox<String> outputFormat;
+
+  @FXML
+  private ProgressBar progressBar;
+
+  @FXML
+  private Label statusLabel;
+
+  @FXML
+  private Button convertButton;
+
+  @FXML
+  private TextField outputFileName;
+
+  @FXML
+  private CheckBox enableEncryptionCheckBox;
+
+  @FXML
+  private CheckBox enableCompressionCheckBox;
+
+  @FXML
+  private CheckBox createShortcutCheckBox;
+
+  @FXML
+  private ComboBox<String> encryptionMethod;
+
+  private Client client;
+
+
+  public JarConverterController(){
+
+    client =  new Client();
+  }
+
+  @FXML
+  public void initialize() {
+    enableEncryptionCheckBox.selectedProperty().addListener((observable, oldValue, newValue) -> {
+      encryptionMethod.setDisable(!newValue);
+    });
+    Session.getUserState().enableEncryptionFeature(enableEncryptionCheckBox);
+    Session.getUserState().enableCompressionFeature(enableCompressionCheckBox);
+  }
+
+  @FXML
+  private void browseJarFile(ActionEvent event) {
+    FileChooser fileChooser = new FileChooser();
+    fileChooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("JAR Files", "*.jar"));
+    File initialDirectory = new File(System.getProperty("user.home"));
+    if (initialDirectory.exists() && initialDirectory.isDirectory()) {
+      fileChooser.setInitialDirectory(initialDirectory);
+    }
+    File selectedFile = fileChooser.showOpenDialog(new Stage());
+    if (selectedFile != null) {
+      jarFilePath.setText(selectedFile.getAbsolutePath());
+    }
+  }
+
+
+  @FXML
+  private void browseSavePath(ActionEvent event) {
+    DirectoryChooser directoryChooser = new DirectoryChooser();
+    directoryChooser.setTitle("Select Save Directory");
+    File initialDirectory = new File(System.getProperty("user.home"));
+    if (initialDirectory.exists() && initialDirectory.isDirectory()) {
+      directoryChooser.setInitialDirectory(initialDirectory);
+    }
+    File selectedDirectory = directoryChooser.showDialog(new Stage());
+    if (selectedDirectory != null) {
+      savePath.setText(selectedDirectory.getAbsolutePath());
+    }
+  }
+
+  @FXML
+  private void handleExit(ActionEvent event) {
+    Stage currentStage = (Stage) ((javafx.scene.Node) event.getSource()).getScene().getWindow();
+    currentStage.close();
+  }
+
+
+
+  @FXML
+  private void handleConvert(ActionEvent event) {
+    convertButton.setDisable(true);
+    boolean encryptionEnabled = enableEncryptionCheckBox.isSelected();
+    boolean compressionEnambled = enableCompressionCheckBox.isSelected();
+    boolean createShortcut = createShortcutCheckBox.isSelected();
+
+    String encryptionAlgorithm = encryptionEnabled ? encryptionMethod.getValue() : null;
+
+    if (encryptionEnabled && (encryptionAlgorithm == null || encryptionAlgorithm.isEmpty())) {
+      statusLabel.setText("Please select an encryption method.");
+      return;
+    }
+
+    EncryptionStrategy encryptionStrategy = null;
+    if (encryptionEnabled) {
+      try {
+        encryptionStrategy = EncryptionStrategyFactory.getStrategy(encryptionAlgorithm);
+      } catch (IllegalArgumentException e) {
+        statusLabel.setText("Invalid encryption method selected.");
+        return;
+      }
+    }
+
+    String jarFile = jarFilePath.getText();
+    String saveLocation = savePath.getText();
+    String format = outputFormat.getValue();
+    String desiredFileName = outputFileName.getText();
+
+    String fileExtension = format.equalsIgnoreCase("EXE") ? ".exe" : ".msi";
+    String outputFilePath = saveLocation + File.separator + desiredFileName + fileExtension;
+
+    InputFile inputFile = new InputFile(jarFilePath.getText(), InputFile.FileType.JAR);
+    OutputFile outputFile =  new OutputFile(saveLocation, desiredFileName, format.equalsIgnoreCase("EXE") ? OutputFile.FileType.EXE : OutputFile.FileType.MSI);
+    try {
+      inputFile.validate();
+      outputFile.validate();
+
+      System.out.println("Converting...");
+      System.out.println("JAR File: " + jarFile);
+      System.out.println("Save Path: " + saveLocation);
+      System.out.println("Output Format: " + format);
+      System.out.println("Desired File Name: " + desiredFileName);
+
+
+      ConversionSettings settings = new ConversionSettings();
+      settings.setEnableEncryption(encryptionEnabled);
+      settings.setEnableCompression(compressionEnambled);
+      settings.setAddShortcut(createShortcut);
+      settings.setEncryptionStrategy(encryptionAlgorithm);
+      settings.setInstallPath(saveLocation);
+      outputFile =  new OutputFile(outputFilePath, desiredFileName, format.equalsIgnoreCase("EXE") ? OutputFile.FileType.EXE : OutputFile.FileType.MSI);
+      Installer installer = new Installer.Builder()
+          .addFile(inputFile)
+          .setConversionSettings(settings)
+          .setOutputFile(outputFile)
+          .addObserver(new GuiObserver(progressBar, statusLabel, convertButton) )
+          .build();
+
+      int userId = Session.getUserId();
+      String saveRequest = String.format("SAVE_FILE %d %s %s %s %s %s",
+          userId,
+          inputFile.getFilePath(),
+          inputFile.getFileType().name(),
+          outputFile.getFilePath(),
+          outputFile.getFileType().name(),
+          outputFile.getIcon() != null ? outputFile.getIcon() : "NULL");
+
+      String response = client.sendRequest(saveRequest);
+
+      if (!response.equals("File saved successfully")) {
+        statusLabel.setText("Error: " + response);
+        convertButton.setDisable(false);
+        return;
+      }
+      new Thread(() -> installer.generatePackage()).start();
+    } catch (IllegalArgumentException e) {
+      statusLabel.setText("Validation Error: " + e.getMessage());
+      convertButton.setDisable(false);
+    }
+
+  }
+
+
+  @FXML
+  private void goToWelcome(ActionEvent event) {
+
+    FXMLLoader loader = new FXMLLoader(getClass().getResource("/application/welcome.fxml"));
+    Parent root = null;
+    try {
+      root = loader.load();
+    } catch (IOException e) {
+      throw new RuntimeException(e);
+    }
+    Scene scene = new Scene(root);
+    Stage stage = (Stage) ((Node) event.getSource()).getScene().getWindow();
+    stage.setScene(scene);
+  }
+
+}
